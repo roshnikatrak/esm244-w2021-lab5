@@ -1,0 +1,114 @@
+---
+title: "Lab 5"
+author: "Roshni Katrak-Adefowora"
+date: "2/6/2021"
+output: html_document
+---
+
+## Part 1: Time series wrangling & forecasting
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tsibble)
+library(feasts)
+library(fable)
+library(here)
+```
+
+Read in energy data and convert to tsibble
+```{r}
+energy <- read_csv(here("data", "energy.csv"))
+
+energy_ts <- energy %>% 
+  mutate(date = tsibble::yearmonth(month)) %>% 
+  as_tsibble(key = NULL, index = date)
+```
+
+Exploratory time series visualization
+```{r}
+ggplot(data=energy_ts, aes(x=date, y=res_total))+
+  geom_line()+
+labs(y="Residential energy consumption \n (Trillion BTU)")
+```
+
+Seasonplot
+```{r}
+energy_ts %>% 
+  gg_season(y=res_total)+
+  theme_minimal()+
+  labs(x="month",
+       y="residental energy consumption (trillion BTU)")
+```
+
+More ways to explore the data:
+Subseries plot
+```{r}
+energy_ts %>% 
+  gg_subseries(res_total)
+```
+
+Decomposition (by STL)
+
+"STL is a versatile and robust method for decomposing time series. STL is an acronym for “Seasonal and Trend decomposition using Loess”, while Loess is a method for estimating nonlinear relationships."
+
+Notice that it allows seasonality to vary over time (a major difference from classical decomposition, and important here since we do see changes in seasonality).
+```{r}
+#find STL decomposition
+dcmp <- energy_ts %>% 
+  model(STL(res_total ~ season()))
+
+#view components
+#components(dcmp)
+
+#visualize decomposed components
+components(dcmp) %>% 
+  autoplot()+
+  theme_minimal()
+```
+
+Autocorrelation function (ACF)
+```{r}
+energy_ts %>% 
+  ACF(res_total) %>% 
+  autoplot()
+```
+
+Forecasting by Holt-Winters exponential smoothing
+```{r}
+#create the model
+energy_fit <- energy_ts %>% 
+  model(ets = ETS(res_total ~ season("M"))) #M means multiplicative, A is additive, N is non-seasonal
+
+#forecast using the model 10 years into the future
+energy_forecast <- energy_fit %>% 
+  forecast(h="10 years")
+
+#plot just the forecasted values (with 80 and 96% CIs)
+energy_forecast %>% 
+  autoplot()
+
+#plot original data + forecasted values
+energy_forecast %>% 
+  autoplot(energy_ts)
+```
+
+Assessing residuals
+```{r}
+#append predicted values (and residuals) to original energy data
+energy_predicted <- broom::augment(energy_fit)
+
+#plot actual energy values and predicted values atop them
+
+ggplot(data=energy_predicted)+
+  geom_line(aes(x=date, y=res_total))+
+  geom_line(aes(x=date, y=.fitted), color="red")
+```
+
+Residuals should be uncorrelated, centered at zero, and ideally normally distributed
+```{r}
+#check for normal distribution and if centered at zero with histogram
+ggplot(data=energy_predicted, aes(x=.resid))+
+  geom_histogram()
+```
+
